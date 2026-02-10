@@ -1,7 +1,11 @@
-/._data_analist_PIV.py
-/._flux_boundary_animation.gif
 /Analysis
 /Masks
 /RawData
 /flux_boundary_animation.gif
 /test_run_2_.run
+/RawData
+*.tif
+*.tiff
+/Analysis *.gif
+*.gif
+_git
