@@ -9,7 +9,7 @@ from skimage import io
 import matplotlib.pyplot as plt
 
 # Base folder of the run (the folder that contains RawData/)
-BASE_DIR = Path("/Volumes/NO NAME/ניסוי PIV/test_run_2_")
+BASE_DIR = Path(__file__).resolve().parent   # התיקייה של data_analist_PIV.py
 RAW_DIR  = BASE_DIR / "RawData"
 
 # Pick any .tif from RawData
@@ -38,7 +38,7 @@ Processing logic: what the code do?
    - median filter suppresses small bright tracer particles
    - robust percentile normalization reduces sensitivity to lighting changes
    - mild Gaussian smoothing stabilizes boundary extraction
-4) Boundary = OUTER ENVELOPE of the cloud as a GENERAL contour (not y(x)):
+4) Boundary = OUTER ENVELOPE of the cloud as a GENERAL contour:
    - threshold at a LOW onset value THRESH_FIXED (“cloud almost vanished”)
    - remove tiny islands + morphological closing to fill tiny gaps
    - keep only the largest connected component (the cloud)
@@ -54,7 +54,6 @@ Processing logic: what the code do?
 
 Notes
 - Without calibration (and without D), treat flux as a trend/proxy, not an absolute value.
-- This script targets Python 3.9 + Spyder.
 """
 
 # =========================
@@ -86,7 +85,7 @@ RAW_DIR  = BASE_DIR / "RawData"
 # Timing
 dt1_ns = 4000.0          # within-PIV-pair separation [ns] 
 dt2_s  = 0.05            # time between indices [seconds] 
-X      = 5               # update boundary every X frames  <-- dt3 = X * dt2
+X      = 5              # update boundary every X frames  <-- dt3 = X * dt2
 
 # Spatial scaling
 PX_PER_MM = 16.0
