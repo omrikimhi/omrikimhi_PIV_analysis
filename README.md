@@ -1,30 +1,61 @@
 PIV droplet concentration analysis
 ----------------------------------
 
-Experiment context:
-- PIV images of a falling “concentration droplet” in a water tank.
-- Each index has TWO closely-spaced images: LA and LB (separation dt1_ns).
-- Consecutive indices are separated by dt2_s.
-- We update the cloud boundary every dt3 = X * dt2_s (every X indices).
+This repository contains Python scripts for analyzing PLIF/PIV images of a falling concentration droplet in a water tank.
 
-Processing logic: what the code do?
-1) Pair parsing (LA/LB): scan RAW_DIR, find complete LA/LB pairs, build idxs.
-2) Background removal: estimate a static background from the first N_BG_FRAMES
-   (median over time), subtract it, clamp negatives to 0 (“absolute black”).
-3) Preprocess intensity to I_norm in [0,1]:
-   - median filter suppresses small bright tracer particles
-   - robust percentile normalization reduces sensitivity to lighting changes
-   - mild Gaussian smoothing stabilizes boundary extraction
-4) Boundary = OUTER ENVELOPE of the cloud as a GENERAL contour:
-   - threshold at a LOW onset value THRESH_FIXED
-   - remove tiny islands + morphological closing to fill tiny gaps
-   - keep only the largest connected component (the cloud)
-   - extract the outer boundary with find_contours; choose the longest contour
-5) “Moving boundary”: re-detect the contour every X frames so it follows the
-   falling droplet (reduces sensitivity to pure translation when interpreting trends).
-6) Diffusive-flux proxy through the contour:
-      Flux_proxy ≈ ∫ ( -∇C · n̂ ) ds
-   with a synthetic mapping C = I_norm * C_MAX (until we have calibration).
-   If we have diffusion coefficient D, set D_DIFF to compute ∫(-D∇C·n̂)ds.
-7) Outputs: animation (image + contour + flux time series) and optional GIF saved
-   OUTSIDE RawData.
+The goal is to extract concentration fields from the images and analyze transport processes such as concentration flux and temporal concentration fluctuations.
+
+---
+
+# Data
+
+Inside the repository there is a folder named `RawData` containing:
+
+- 50 pairs of PIV images of a falling droplet
+- Each time step contains two closely spaced frames (`LA` and `LB`)
+- Image format: `.tif`
+
+These images are the raw experimental data used by the analysis scripts.
+
+---
+
+# Files
+
+## `Open_a_TIF.py`
+
+A simple utility script for opening and displaying `.tif` images.
+
+---
+
+## `data_analist_PIV.py`
+
+Performs a **concentration flux analysis** of the droplet.
+
+Main steps:
+
+1. Load image pairs and compute a single intensity field.
+2. Remove background and apply filtering.
+3. Estimate the droplet boundary from the concentration field.
+4. Define a moving boundary line following the droplet.
+5. Estimate the concentration flux crossing this boundary.
+
+The computed quantity is a proxy for diffusive flux:
+
+### Flux_proxy ≈ ∫ ( -∇C · n̂ )
+
+---
+
+## `2_point_correlation.py`
+
+Performs a **two-point concentration analysis**.
+
+Main steps:
+
+1. Extract the concentration field from the processed images.
+2. Select two spatial points in the flow.
+3. Compute concentration time series at both points.
+4. Remove the temporal mean to obtain concentration fluctuations:
+
+### c' = c − ⟨c⟩
+
+5. Visualize the evolution of the concentration fluctuations at the two locations.
