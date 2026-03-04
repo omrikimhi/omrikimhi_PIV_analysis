@@ -47,7 +47,7 @@ The computed quantity is a proxy for diffusive flux:
 
 ## `2_point_correlation.py`
 
-Performs a **two-point concentration analysis**.
+Performs a **two-point concentration analysis** from the processed image sequence.
 
 Main steps:
 
@@ -58,4 +58,18 @@ Main steps:
 
 ### c' = c − ⟨c⟩
 
-5. Visualize the evolution of the concentration fluctuations at the two locations.
+5. Compute the cross-correlation between the two signals:
+
+### Rcc(τ) = ⟨c1'(t) · c2'(t + τ)⟩
+
+6. Identify the correlation peak \(R_peak\) and the corresponding time delay \(τ_peak\).
+
+### Visualization
+
+The script generates an animated figure showing:
+
+- The filtered/normalized flow image with the two selected points
+- The concentration fluctuations at both locations
+- The cross-correlation function
+
+A dashed vertical line in the time-series plot indicates the **current time frame** in the animation.
