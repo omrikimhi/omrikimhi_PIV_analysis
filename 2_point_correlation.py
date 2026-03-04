@@ -231,16 +231,58 @@ c1_p = c1 - c1_bar
 c2_p = c2 - c2_bar
 
 # =========================
+# CROSS-CORRELATION (static)
+# =========================
+
+# Cross-correlation R_cc(tau) = < c1'(t)*c2'(t+tau) >
+# We'll compute the normalized correlation coefficient so values are in [-1, 1].
+
+c1p = c1_p - np.mean(c1_p)
+c2p = c2_p - np.mean(c2_p)
+
+N = len(c1p)
+dt = dt2_s  # your time step in seconds
+
+# raw cross-correlation (full lags)
+R_raw = np.correlate(c1p, c2p, mode="full")  # length 2N-1
+lags = np.arange(-(N-1), N)                  # sample lags
+tau = lags * dt                              # time lags [s]
+
+# normalize to correlation coefficient (avoid divide by zero)
+den = (np.std(c1p) * np.std(c2p) * N) + 1e-12
+R = R_raw / den  # now roughly in [-1, 1]
+
+# If you want "c1 leads c2" (tau >= 0):
+mask_pos = tau >= 0
+tau_pos = tau[mask_pos]
+R_pos = R[mask_pos]
+
+# peak (for tau >= 0)
+i_peak = int(np.argmax(R_pos))
+tau_peak = float(tau_pos[i_peak])
+R_peak = float(R_pos[i_peak])
+
+# =========================
 # VISUALIZATION (animation)
 # =========================
 
 # compute fixed y-scale based on max amplitude of the two time series
-ymax = np.max(np.abs(np.concatenate([c1_p, c2_p])))
+ymax = float(np.max(np.abs(np.concatenate([c1_p, c2_p]))))
 pad = 0.1 * (ymax + 1e-12)
 
-fig = plt.figure(figsize=(12, 5))
-ax_img = fig.add_subplot(1, 2, 1)
-ax_ts  = fig.add_subplot(1, 2, 2)
+fig = plt.figure(figsize=(16, 6))
+gs = fig.add_gridspec(
+    nrows=2, ncols=3,
+    height_ratios=[14, 0.9],   # main row for plots, bottom row for text
+    hspace=0.18, wspace=0.28
+)
+
+ax_img  = fig.add_subplot(gs[0, 0])
+ax_ts   = fig.add_subplot(gs[0, 1])
+ax_corr = fig.add_subplot(gs[0, 2])
+
+ax_txt  = fig.add_subplot(gs[1, :])  # text box spanning the bottom row
+ax_txt.axis("off")
 
 # image plot
 im = ax_img.imshow(frames_I[0], cmap="gray", vmin=0, vmax=1)
@@ -260,23 +302,49 @@ ax_ts.set_ylim(-ymax - pad, ymax + pad)
 
 ax_ts.set_xlabel("t [s]")
 ax_ts.set_ylabel("C' [kg/m³]")
+ax_ts.set_title("Concentration fluctuations at two points")
 
 ax_ts.legend(loc="best")
 
 # zero reference line
 ax_ts.axhline(0, color="gray", linewidth=1.5, linestyle="--")
 
-# text box
-txt = ax_ts.text(
-    0.98, 0.98, "",
-    transform=ax_ts.transAxes,
+# vertical line showing current frame time
+time_line, = ax_ts.plot([times[0], times[0]], [ax_ts.get_ylim()[0], ax_ts.get_ylim()[1]],
+                        linestyle="--", linewidth=1, color="red", label="Current time")
+# --- correlation plot (static) ---
+line_corr, = ax_corr.plot(tau_pos, R_pos, linewidth=1.5, label="R_cc(τ)")
+ax_corr.set_xlabel("τ [s]")
+ax_corr.set_ylabel("R_cc(τ)")
+ax_corr.set_title("Cross-correlation")
+
+# reference lines
+ax_corr.axhline(0, color="gray", linewidth=1.0, linestyle="--")
+vline_peak = ax_corr.axvline(tau_peak, color="gray", linewidth=1.0, linestyle="--")
+
+# nice limits
+ax_corr.set_xlim(tau_pos.min(), tau_pos.max())
+ax_corr.set_ylim(-1.05, 1.05)
+
+# small annotation
+corr_txt = ax_corr.text(
+    0.98, 0.98,
+    f"R_cc(τ) = < c1'(t)*c2'(t+τ) >\nτ_peak = {tau_peak:.3g} s\nR_peak = {R_peak:.3g}",
+    transform=ax_corr.transAxes,
     va="top", ha="right",
+    fontsize=10,
+    bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.8)
+)
+
+# text box
+txt = ax_txt.text(
+    0.5, 0.18, "",
+    ha="center", va="center",
     fontsize=11,
-    linespacing=1.4,
-    bbox=dict(boxstyle="round",
-              facecolor="#1f77b4",
-              edgecolor="none",
-              alpha=0.85)
+    color="white",
+    linespacing=1.3,
+    bbox=dict(boxstyle="round", facecolor="#1f77b4", edgecolor="none", alpha=0.9),
+    transform=ax_txt.transAxes
 )
 
 # ANIMATION UPDATE FUNCTION
@@ -286,22 +354,18 @@ def update(i):
     im.set_data(frames_I[i])
 
     # update time series
-    line_c1.set_data(times[:i+1], c1_p[:i+1])
-    line_c2.set_data(times[:i+1], c2_p[:i+1])
+    line_c1.set_data(times, c1_p)
+    line_c2.set_data(times, c2_p)
+
+    # update moving time indicator
+    time_line.set_xdata([times[i], times[i]])
 
     # update text box
     txt.set_text(
-        f"V_tot = {V_m3:.2e} [m³]\n"
-        f"ρ = {FLUID_DENSITY:.1f} [kg/m³]\n"
-        f"M_tot = {M_total_kg:.2e} [kg]\n"
-        f"DEPTH = {DEPTH_M:.2g} [m]\n"
-        f"<c1> = {c1_bar:.2e}\n"
-        f"<c2> = {c2_bar:.2e}\n"
-        f"c1' = {c1_p[i]:+.2e}\n"
-        f"c2' = {c2_p[i]:+.2e}"
+        f"V_tot = {V_m3:.2e} [m³] | ρ = {FLUID_DENSITY:.1f} [kg/m³] | M_tot = {M_total_kg:.2e} [kg] | DEPTH = {DEPTH_M:.2g} [m]\n"
+        f"<c1> = {c1_bar:.2e} | c1' = {c1_p[i]:+.2e} | <c2> = {c2_bar:.2e} | c2' = {c2_p[i]:+.2e}"
     )
-
-    return im, line_c1, line_c2, txt
+    return im, line_c1, line_c2, time_line, txt
 
 # RUN ANIMATION
 ani = FuncAnimation(
@@ -311,6 +375,9 @@ ani = FuncAnimation(
     interval=100,
     blit=False
 )
+ax_img.set_box_aspect(1)
+ax_ts.set_box_aspect(1)
+ax_corr.set_box_aspect(1)
 
-plt.tight_layout()
+fig.subplots_adjust(left=0.04, right=0.99, top=0.93, bottom=0.06)
 plt.show()
