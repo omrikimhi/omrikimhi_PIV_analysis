@@ -8,39 +8,45 @@
 """
 Two-point concentration analysis from PLIF images
 
-General workflow:
+Workflow:
 
 1. Image pairing
    Each time step contains two images (LA and LB). The images are read and
    averaged to create a single intensity field for that time step.
 
 2. Background removal and filtering
-   A background image is estimated from the first frames and subtracted
-   from each image. The resulting image is filtered (median + Gaussian)
-   and normalized to reduce noise and improve the signal.
+   A background image is estimated from the first frames and subtracted.
+   The images are then filtered (median + Gaussian) and normalized to
+   reduce noise and improve signal quality.
 
 3. Concentration calibration
-   The total injected volume and density are defined by the user.
-   Using the last frame, the image intensity is calibrated so that the
+   The total injected volume and fluid density are defined by the user.
+   Using the last frame, image intensity is calibrated so that the
    integrated concentration field corresponds to the known total mass.
 
 4. Point selection
    Two spatial points are selected interactively on the image.
-   Around each point a small neighborhood is averaged to obtain a
+   A small neighborhood around each point is averaged to obtain a
    representative concentration value.
 
 5. Fluctuation calculation
-   For each point the mean concentration is computed over time.
-   Concentration fluctuations are then defined as:
+   The temporal mean concentration is computed at each point and
+   fluctuations are defined as:
        c' = c - <c>
 
-6. Visualization
+6. Correlation analysis
+   The cross-correlation between the two fluctuation signals is computed:
+       Rcc(τ) = <c1'(t) c2'(t + τ)>
+   The correlation peak and corresponding time delay are identified.
+
+7. Visualization
    The script displays:
-   - the processed PLIF image with the two selected points
-   - the time series of c' at both points
-   - relevant experiment parameters (volume, density, total mass, etc.)
-   - a reference line at c' = 0
+   - the processed PLIF image with the selected points
+   - the time series of c1'(t) and c2'(t)
+   - the cross-correlation function
+   - a moving time indicator synchronized with the animation
 """
+
 # =========================
 # IMPORTS
 # =========================
