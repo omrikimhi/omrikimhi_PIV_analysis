@@ -28,8 +28,8 @@ Processing logic: what the code do?
    falling droplet (reduces sensitivity to pure translation when interpreting trends).
 6) Diffusive-flux proxy through the contour:
       Flux_proxy ≈ ∫ ( -∇C · n̂ ) ds
-   with a synthetic mapping C = I_norm * C_MAX (until you have calibration).
-   If you know a diffusion coefficient D, set D_DIFF to compute ∫(-D∇C·n̂)ds.
+   with a synthetic mapping C = I_norm * C_MAX (until we have calibration).
+   If we know a diffusion coefficient D, set D_DIFF to compute ∫(-D∇C·n̂)ds.
 7) Outputs: animation (image + contour + flux time series) and optional GIF saved
    OUTSIDE RawData (in BASE_DIR or an output folder).
 
