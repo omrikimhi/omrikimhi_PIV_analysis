@@ -268,6 +268,15 @@ i_peak = int(np.argmax(R_pos))
 tau_peak = float(tau_pos[i_peak])
 R_peak = float(R_pos[i_peak])
 
+# vertical separation and apparent downward speed
+dy_px = abs(y2 - y1)
+dy_m = dy_px * M_PER_PX   # positive downward if image coordinates increase downward
+
+if abs(tau_peak) > 1e-12:
+    Vy_app = dy_m / tau_peak
+else:
+    Vy_app = np.nan
+
 # =========================
 # VISUALIZATION (animation)
 # =========================
@@ -295,7 +304,7 @@ im = ax_img.imshow(frames_I[0], cmap="gray", vmin=0, vmax=1)
 p1_sc = ax_img.scatter([x1], [y1], s=60)
 p2_sc = ax_img.scatter([x2], [y2], s=60)
 
-ax_img.set_title("Filtered/normalized droplet + two points")
+ax_img.set_title("Droplet animation + the two points")
 ax_img.set_xlim(0, W-1)
 ax_img.set_ylim(H-1, 0)
 
@@ -322,7 +331,7 @@ time_line, = ax_ts.plot([times[0], times[0]], [ax_ts.get_ylim()[0], ax_ts.get_yl
 line_corr, = ax_corr.plot(tau_pos, R_pos, linewidth=1.5, label="R_cc(τ)")
 ax_corr.set_xlabel("τ [s]")
 ax_corr.set_ylabel("R_cc(τ)")
-ax_corr.set_title("Cross-correlation")
+ax_corr.set_title("Cross-correlation\nR_cc(τ) = < c1'(t)*c2'(t+τ)>")
 
 # reference lines
 ax_corr.axhline(0, color="gray", linewidth=1.0, linestyle="--")
@@ -335,7 +344,10 @@ ax_corr.set_ylim(-1.05, 1.05)
 # small annotation
 corr_txt = ax_corr.text(
     0.98, 0.98,
-    f"R_cc(τ) = < c1'(t)*c2'(t+τ) >\nτ_peak = {tau_peak:.3g} s\nR_peak = {R_peak:.3g}",
+    f"τ_peak = {tau_peak:.3g} [s]\n"
+    f"R_peak = {R_peak:.3g}\n"
+    f"Δy = {dy_m*1e3:.4g} [mm]\n"
+    f"V_y = {Vy_app*1e3:.4g} [mm/s]",
     transform=ax_corr.transAxes,
     va="top", ha="right",
     fontsize=10,
