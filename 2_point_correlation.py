@@ -51,10 +51,13 @@ Workflow:
 # IMPORTS
 # =========================
 from pathlib import Path
+import os
 import re
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+
+from dotenv import find_dotenv, load_dotenv
 
 from skimage import io
 from skimage.filters import gaussian
@@ -65,7 +68,25 @@ from scipy.ndimage import median_filter
 # =========================
 
 BASE_DIR = Path(__file__).resolve().parent
-RAW_DIR  = BASE_DIR / "RawData"
+
+
+def resolve_raw_dir(base_dir):
+    load_dotenv(find_dotenv(usecwd=True))
+
+    raw_dir_value = os.getenv("PIV_RAW_DIR")
+    if raw_dir_value:
+        raw_dir = Path(raw_dir_value).expanduser()
+        if not raw_dir.is_absolute():
+            raw_dir = base_dir / raw_dir
+        return raw_dir.resolve()
+
+    return (base_dir / "RawData").resolve()
+
+
+RAW_DIR = resolve_raw_dir(BASE_DIR)
+
+if not RAW_DIR.exists():
+    raise FileNotFoundError(f"RAW_DIR does not exist: {RAW_DIR}")
 
 # Timing
 dt2_s  = 0.05  # seconds between indices
