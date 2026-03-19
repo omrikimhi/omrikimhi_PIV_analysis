@@ -4,6 +4,8 @@
 /flux_boundary_animation.gif
 /test_run_2_.run
 /RawData
+.env
+.env.*
 *.tif
 *.tiff
 /Analysis *.gif

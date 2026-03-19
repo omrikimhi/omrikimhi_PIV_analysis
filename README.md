@@ -5,6 +5,24 @@ This repository contains Python scripts for analyzing PLIF/PIV images of a falli
 
 The goal is to extract concentration fields from the images and analyze transport processes such as concentration flux and temporal concentration fluctuations.
 
+## Local configuration
+
+The scripts read the RawData location from the `PIV_RAW_DIR` environment variable.
+
+Create a local `.env` file in the repository root with the absolute path to your `RawData` folder, for example:
+
+```text
+PIV_RAW_DIR=/home/user/Documents/GitHub/omrikimhi_PIV_analysis/test_run_2_/RawData
+```
+
+If `PIV_RAW_DIR` is not set, the scripts fall back to `RawData/` next to the script.
+
+Run the scripts with `uv`, for example:
+
+```bash
+uv run python 2_point_correlation.py
+```
+
 ---
 
 # Data
