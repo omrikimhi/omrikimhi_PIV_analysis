@@ -68,7 +68,7 @@ BASE_DIR = Path(__file__).resolve().parent
 RAW_DIR  = BASE_DIR / "RawData"
 
 # Timing
-dt2_s  = 0.05  # seconds between indices
+dt2_s  = 1  # seconds between indices (information from tstmp in rowdata)
 
 # Spatial scaling
 PX_PER_MM = 16.0
@@ -87,10 +87,10 @@ FLUID_DENSITY = 1000.0      # [kg/m^3]
 DEPTH_M = 0.1               # [m] estimation of depth for converting from mass to concentration. This is estimation of squere depth of the volume.
 
 # ===== Setting the Two points =====
-USE_MOUSE_PICK = True
+USE_MOUSE_PICK = False
 
-P1 = (300, 200) # set default points in case not using mouse pick (x,y) in pixel coordinates.
-P2 = (360, 240)
+P1 = (1500, 600) # set default points in case not using mouse pick (x,y) in pixel coordinates.
+P2 = (1500, 800)
 
 POINT_RADIUS_PX = 3   # 0 = single pixel, 2 = (5x5) mean, etc.
 
@@ -222,7 +222,7 @@ if sum_I_last < 1e-12:
 k = M_total_kg / (sum_I_last * PX_AREA_M2 * DEPTH_M)  # so that C = k*I gives correct total mass
 
 print("Calibration done.")
-print(f"M_total_kg = {M_total_kg:.6e} kg, DEPTH_M={DEPTH_M}, k={k:.6e} (kg/m^3 per intensity-unit)")
+print(f"M_total_kg = {M_total_kg:.3e} kg,  DEPTH_M={DEPTH_M}, k={k:.3e} (kg/m^3 per intensity-unit)")
 
 # ===== Step 4: two-point time series + primes =====
 
@@ -247,7 +247,7 @@ c1p = c1_p - np.mean(c1_p)
 c2p = c2_p - np.mean(c2_p)
 
 N = len(c1p)
-dt = dt2_s  # your time step in seconds
+dt = dt2_s
 
 # raw cross-correlation (full lags)
 R_raw = np.correlate(c1p, c2p, mode="full")  # length 2N-1
@@ -258,7 +258,7 @@ tau = lags * dt                              # time lags [s]
 den = (np.std(c1p) * np.std(c2p) * N) + 1e-12
 R = R_raw / den  # now roughly in [-1, 1]
 
-# If you want "c1 leads c2" (tau >= 0):
+# "c1 leads c2" (tau >= 0):
 mask_pos = tau >= 0
 tau_pos = tau[mask_pos]
 R_pos = R[mask_pos]
@@ -385,6 +385,24 @@ def update(i):
     )
     return im, line_c1, line_c2, time_line, txt
 
+
+def save_single_axis(ax, filename, expand=(1.02, 1.02)):
+    """Save one axis from the combined figure as a separate PDF."""
+    fig = ax.figure
+    fig.canvas.draw()
+    bbox = ax.get_tightbbox(fig.canvas.get_renderer()).expanded(*expand)
+    fig.savefig(filename, bbox_inches=bbox.transformed(fig.dpi_scale_trans.inverted()))
+
+ax_img.set_box_aspect(1)
+ax_ts.set_box_aspect(1)
+ax_corr.set_box_aspect(1)
+
+fig.subplots_adjust(left=0.04, right=0.99, top=0.93, bottom=0.06)
+update(T - 1)
+save_single_axis(ax_img, "2_point_correlation_image_last_frame.pdf")
+save_single_axis(ax_ts, "2_point_correlation_timeseries_last_frame.pdf")
+save_single_axis(ax_corr, "2_point_correlation_correlation_last_frame.pdf")
+
 # RUN ANIMATION
 ani = FuncAnimation(
     fig,
@@ -393,9 +411,4 @@ ani = FuncAnimation(
     interval=100,
     blit=False
 )
-ax_img.set_box_aspect(1)
-ax_ts.set_box_aspect(1)
-ax_corr.set_box_aspect(1)
-
-fig.subplots_adjust(left=0.04, right=0.99, top=0.93, bottom=0.06)
 plt.show()

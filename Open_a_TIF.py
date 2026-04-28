@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent   # התיקייה של data_analist_
 RAW_DIR  = BASE_DIR / "RawData"
 
 # Pick any .tif from RawData
-img = io.imread(RAW_DIR / "test_run_1_001247.T000.D000.P000.H000.LA.tif")
+img = io.imread(RAW_DIR / "test_run_1_001223.T000.D000.P000.H000.LB.tif")
 
 plt.imshow(img, cmap="gray")
 plt.axis("off")

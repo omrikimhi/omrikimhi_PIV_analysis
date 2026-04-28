@@ -7,7 +7,7 @@ PIV droplet concentration analysis
 
 Experiment context:
 - PIV images of a falling “concentration droplet” in a water tank.
-- Each index has TWO closely-spaced images: LA and LB (separation dt1_ns).
+- Each index has TWO closely-spaced images: LA and LB (separation dt1_µs).
 - Consecutive indices are separated by dt2_s.
 - We update the cloud boundary every dt3 = X * dt2_s (every X indices).
 
@@ -64,8 +64,8 @@ BASE_DIR = Path(__file__).resolve().parent   # התיקייה של data_analist_
 RAW_DIR  = BASE_DIR / "RawData"
 
 # Timing
-dt1_ns = 4000.0          # within-PIV-pair separation [ns] 
-dt2_s  = 0.05            # time between indices [seconds] 
+dt1_µs = 4000.0          # within-PIV-pair separation [µs] 
+dt2_s  = 1            # time between indices [seconds] 
 X      = 5              # update boundary every X frames  <-- dt3 = X * dt2
 
 # Spatial scaling
