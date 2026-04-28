@@ -399,9 +399,9 @@ ax_corr.set_box_aspect(1)
 
 fig.subplots_adjust(left=0.04, right=0.99, top=0.93, bottom=0.06)
 update(T - 1)
-save_single_axis(ax_img, "2_point_correlation_image_last_frame.pdf")
-save_single_axis(ax_ts, "2_point_correlation_timeseries_last_frame.pdf")
-save_single_axis(ax_corr, "2_point_correlation_correlation_last_frame.pdf")
+#save_single_axis(ax_img, "2_point_correlation_image_last_frame.pdf")
+#save_single_axis(ax_ts, "2_point_correlation_timeseries_last_frame.pdf")
+#save_single_axis(ax_corr, "2_point_correlation_correlation_last_frame.pdf")
 
 # RUN ANIMATION
 ani = FuncAnimation(
