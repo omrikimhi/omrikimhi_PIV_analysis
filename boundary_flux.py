@@ -34,7 +34,7 @@ WORKFLOW:
 
 2. Concentration estimation
    - Convert image intensity into a concentration proxy.
-   - Use the known injected mass to scale the concentration field.
+   - Use the known injected mass and cylindrical-symmetry weighting to scale the concentration field.
 
 3. Boundary detection
    - Detect the droplet region using thresholding.
@@ -79,7 +79,8 @@ MAIN ASSUMPTIONS:
 - Boundary transport is dominated by the boundary-normal component.
 - The selected droplet boundary represents the turbulent mixing interface.
 - Local time averaging should begin only after scalar arrival at each point.
-- The flow is analyzed in a 2D measurement plane.
+- The measured image is 2D; conversion to a mass-scaled concentration uses an axisymmetric reconstruction assumption.
+- The image contains the full flow field.
 ----------------------------------------------------------------------
 
 OUTPUTS:
@@ -155,10 +156,20 @@ BOUNDARY_RESAMPLE_STEP_PX = 3.0 # Resample the detected boundary points to have 
 # concentration calibration
 INJECTED_VOL_ML = 50.0 # Injected volume in mL
 FLUID_DENSITY = 1500.0 # Fluid density in kg/m^3
-DEPTH_M = 0.1 # Measurement depth in meters
 PX_PER_MM_PLIF = 16.0 # Pixels per mm for PLIF measurement
-M_PER_PX_PLIF = 1e-3 / PX_PER_MM_PLIF 
+
+M_PER_PX_PLIF = 1e-3 / PX_PER_MM_PLIF
 PX_AREA_M2 = M_PER_PX_PLIF**2
+
+'''
+Choose how the cylindrical symmetry axis x-position is defined:
+   "centroid"     = intensity-weighted centroid of the last processed image
+   "frame_center" = geometric center of the image frame
+   "manual"       = use CYL_MANUAL_AXIS_X_PX
+'''
+CYL_AXIS_MODE = "centroid"
+CYL_MANUAL_AXIS_X_PX = None # used only if CYL_AXIS_MODE = "manual", e.g. 512.0
+CYL_R_MIN_PX = 0.5 # avoids zero volume weight exactly on the symmetry axis
 
 # local time average after arrival
 ARRIVAL_FRAC = 0.05 # Fraction of local max to define arrival time (t_0)
@@ -170,6 +181,10 @@ GRAD_EPS = 1e-12 # Epsilon for gradient calculation
 R_EPS = 1e-20 # Epsilon for radius calculation
 
 INVALID_CHC_VALUES = {0} # Values that are considered invalid for concentration from the VEC files.
+
+#cache
+VEC_CACHE = {} # Cache for preloaded VEC files. This avoids reading and pivoting each .vec file again inside the main time loop.
+
 
 # contour smoothing
 SMOOTH_CONTOUR_SIGMA_PX = 10.0 # Larger values make the detected boundary smoother and less wiggly.
@@ -253,16 +268,71 @@ def preprocess(img, bg):
     return x
 
 
-def calibrate_k(idxs, pairs, bg):
+def determine_cyl_axis_x(I_last):
+    """Determine the x-position of the cylindrical symmetry axis.
+
+    Modes:
+    - centroid: intensity-weighted centroid of the last processed image.
+    - frame_center: geometric center of the image frame.
+    - manual: user-defined CYL_MANUAL_AXIS_X_PX.
+    """
+    H, W = I_last.shape
+
+    if CYL_AXIS_MODE == "frame_center":
+        return 0.5 * (W - 1)
+
+    if CYL_AXIS_MODE == "manual":
+        if CYL_MANUAL_AXIS_X_PX is None:
+            raise RuntimeError("CYL_AXIS_MODE='manual' requires CYL_MANUAL_AXIS_X_PX to be set.")
+        return float(CYL_MANUAL_AXIS_X_PX)
+
+    if CYL_AXIS_MODE == "centroid":
+        x = np.arange(W, dtype=float)
+        weights_x = np.nansum(I_last, axis=0)
+        total = float(np.nansum(weights_x))
+        if total < 1e-12:
+            raise RuntimeError("Cannot determine cylindrical axis: last-frame intensity is too small.")
+        return float(np.nansum(x * weights_x) / total)
+
+    raise RuntimeError("Invalid CYL_AXIS_MODE. Use 'centroid', 'frame_center', or 'manual'.")
+
+
+def cylindrical_volume_weights(shape, x_axis_px):
+    """Return per-pixel volume weights for a full axisymmetric PLIF slice.
+
+    The image is interpreted as a vertical x-y slice through an approximately
+    axisymmetric droplet/plume. The x distance from the symmetry axis is the
+    radius r.
+
+    This version always assumes that both sides of the flow are visible in the
+    image. Therefore each pixel receives pi*r*dA, because the left and right
+    sides together represent the full annulus 2*pi*r*dr*dy.
+    """
+    H, W = shape
+    x = np.arange(W, dtype=float)
+    r_px = np.maximum(np.abs(x - x_axis_px), CYL_R_MIN_PX)
+    r_m = r_px * M_PER_PX_PLIF
+
+    weights_1d = np.pi * r_m * PX_AREA_M2
+    return np.broadcast_to(weights_1d[None, :], (H, W)).astype(np.float64)
+
+
+def calibrate_k(idxs, pairs, bg, x_axis_px):
+    """Scale intensity to concentration using cylindrical symmetry.
+
+    C = k*I, and k is chosen so that integral(C dV) equals the injected mass.
+    """
     V_m3 = INJECTED_VOL_ML * 1e-6
     M_total_kg = FLUID_DENSITY * V_m3
 
     I_last = preprocess(read_pair_mean(pairs, idxs[-1]), bg)
-    s = float(np.sum(I_last))
-    if s < 1e-12:
-        raise RuntimeError("Last frame intensity sum is too small for calibration.")
+    dV = cylindrical_volume_weights(I_last.shape, x_axis_px)
 
-    return M_total_kg / (s * PX_AREA_M2 * DEPTH_M)
+    weighted_intensity = float(np.nansum(I_last * dV))
+    if weighted_intensity < 1e-12:
+        raise RuntimeError("Last frame weighted intensity is too small for calibration.")
+
+    return M_total_kg / weighted_intensity
 
 
 def sample_image(img, x_px, y_px):
@@ -275,6 +345,28 @@ def sample_image(img, x_px, y_px):
         fill_value=np.nan,
     )
     return interp(np.column_stack([y_px, x_px]))
+
+
+def sample_image_triplet(img, x0, y0, x1, y1, x2, y2):
+    """Sample one image at three point sets using one interpolator.
+
+    This is faster than building a new RegularGridInterpolator three times
+    for C, Cout, and Cin.
+    """
+    H, W = img.shape
+    interp = RegularGridInterpolator(
+        (np.arange(H, dtype=float), np.arange(W, dtype=float)),
+        img,
+        method="linear",
+        bounds_error=False,
+        fill_value=np.nan,
+    )
+
+    pts0 = np.column_stack([y0, x0])
+    pts1 = np.column_stack([y1, x1])
+    pts2 = np.column_stack([y2, x2])
+
+    return interp(pts0), interp(pts1), interp(pts2)
 
 
 # ============================================================
@@ -411,30 +503,55 @@ def read_vec_grid(path):
     return xu, yu, U, V
 
 
+def preload_vec_data(idxs):
+    """Load all VEC files once into memory.
+
+    This avoids repeating the slow operations inside the main loop:
+    disk reading, pandas parsing, pivoting, and interpolator construction.
+    """
+    global VEC_CACHE
+    VEC_CACHE = {}
+
+    for idx in idxs:
+        path = resolve_vec_path(idx)
+        if path is None:
+            continue
+
+        meta = parse_vec_header(path)
+        xu, yu, U, V = read_vec_grid(path)
+
+        ui = RegularGridInterpolator((yu, xu), U, bounds_error=False, fill_value=np.nan)
+        vi = RegularGridInterpolator((yu, xu), V, bounds_error=False, fill_value=np.nan)
+
+        VEC_CACHE[idx] = {
+            "meta": meta,
+            "ui": ui,
+            "vi": vi,
+            "mm_per_px_x": meta["um_per_px_x"] * 1e-3,
+            "mm_per_px_y": meta["um_per_px_y"] * 1e-3,
+        }
+
+    print(f"Loaded {len(VEC_CACHE)} VEC fields into memory.")
+
+
 def sample_unormal(idx, x_px, y_px, nx, ny):
-    path = resolve_vec_path(idx)
-    if path is None:
+    if idx not in VEC_CACHE:
         return np.full_like(x_px, np.nan, dtype=float)
 
-    meta = parse_vec_header(path)
-    xu, yu, U, V = read_vec_grid(path)
+    data = VEC_CACHE[idx]
+    meta = data["meta"]
+    ui = data["ui"]
+    vi = data["vi"]
 
-    ui = RegularGridInterpolator((yu, xu), U, bounds_error=False, fill_value=np.nan)
-    vi = RegularGridInterpolator((yu, xu), V, bounds_error=False, fill_value=np.nan)
-
-    mm_per_px_x = meta["um_per_px_x"] * 1e-3
-    mm_per_px_y = meta["um_per_px_y"] * 1e-3
-
-    x_mm = (x_px - meta["origin_x_px"]) * mm_per_px_x
-    y_mm = -(y_px - meta["origin_y_px"]) * mm_per_px_y
+    x_mm = (x_px - meta["origin_x_px"]) * data["mm_per_px_x"]
+    y_mm = -(y_px - meta["origin_y_px"]) * data["mm_per_px_y"]
 
     pts = np.column_stack([y_mm, x_mm])
 
     u = ui(pts)
     v_down = -vi(pts)  # VEC v to image-y-positive-down convention
 
-    un = u * nx + v_down * ny
-    return un
+    return u * nx + v_down * ny
 
 
 # ============================================================
@@ -552,10 +669,13 @@ def main():
     print(f"Found {len(idxs)} frames: {idxs[0]}..{idxs[-1]}")
     print(f"Selected frame: {target_idx}")
 
-    bg = estimate_background(idxs, pairs)
-    k = calibrate_k(idxs, pairs, bg)
-    print(f"Calibration k = {k:.6e}")
+    print("Loading VEC files into memory...")
+    preload_vec_data(idxs)
 
+    bg = estimate_background(idxs, pairs)
+
+    # First detect the boundary on the selected frame. All later statistics are
+    # computed only at these boundary points and at their normal offsets.
     I0 = preprocess(read_pair_mean(pairs, target_idx), bg)
     contour_raw, mask, thr = detect_boundary(I0)
     if contour_raw is None:
@@ -566,11 +686,17 @@ def main():
     x, y, nx, ny, ds_px = contour_geometry(contour)
     Np = len(x)
 
-    vec0 = resolve_vec_path(target_idx)
-    if vec0 is None:
+    I_last_for_axis = preprocess(read_pair_mean(pairs, idxs[-1]), bg)
+    x_axis_px = determine_cyl_axis_x(I_last_for_axis)
+    k = calibrate_k(idxs, pairs, bg, x_axis_px)
+    print(f"Cylindrical axis mode = {CYL_AXIS_MODE}")
+    print(f"Cylindrical symmetry axis x = {x_axis_px:.2f} px")
+    print(f"Calibration k = {k:.6e} kg/m^3 per normalized intensity")
+
+    if target_idx not in VEC_CACHE:
         raise RuntimeError("No VEC file for selected frame.")
 
-    meta0 = parse_vec_header(vec0)
+    meta0 = VEC_CACHE[target_idx]["meta"]
     mm_per_px = 0.5 * (meta0["um_per_px_x"] + meta0["um_per_px_y"]) * 1e-3
     ds_m = ds_px * mm_per_px * 1e-3
     dn_m = NORMAL_OFFSET_PX * mm_per_px * 1e-3
@@ -590,9 +716,9 @@ def main():
         I = preprocess(read_pair_mean(pairs, idx), bg)
         C = k * I
 
-        C_ts[it] = sample_image(C, x, y)
-        Cout_ts[it] = sample_image(C, x_out, y_out)
-        Cin_ts[it] = sample_image(C, x_in, y_in)
+        C_ts[it], Cout_ts[it], Cin_ts[it] = sample_image_triplet(
+            C, x, y, x_out, y_out, x_in, y_in
+        )
         Un_ts[it] = sample_unormal(idx, x, y, nx, ny)
 
         if (it + 1) % 10 == 0 or it == Nt - 1:
