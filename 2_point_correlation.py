@@ -22,7 +22,8 @@ Workflow:
 3. Concentration calibration
    The total injected volume and fluid density are defined by the user.
    Using the last frame, image intensity is calibrated so that the
-   integrated concentration field corresponds to the known total mass.
+   axisymmetric 3D mass reconstructed from the 2D PLIF plane corresponds
+   to the known total injected mass.
 
 4. Point selection
    Two spatial points are selected interactively on the image.
@@ -84,7 +85,17 @@ SMOOTH_SIGMA = 1.0
 # ===== Definition of the injected material =====
 INJECTED_VOL_ML = 50.0      # [mL]
 FLUID_DENSITY = 1000.0      # [kg/m^3]
-DEPTH_M = 0.1               # [m] estimation of depth for converting from mass to concentration. This is estimation of squere depth of the volume.
+
+'''
+Concentration calibration assumption is cylindrical symmetry around a vertical axis.
+ Axis options:
+   "centroid"     - x-axis from intensity-weighted centroid of the last frame
+   "frame_center" - x-axis at the center of the image
+   "manual"       - use CYL_MANUAL_AXIS_X_PX
+'''
+CYL_AXIS_MODE = "centroid"
+CYL_MANUAL_AXIS_X_PX = None  # e.g. 1500.0, used only if CYL_AXIS_MODE = "manual"
+CYL_R_EPS_PX = 1e-6          # avoids zero radius exactly on the symmetry axis
 
 # ===== Setting the Two points =====
 USE_MOUSE_PICK = False
@@ -171,6 +182,65 @@ def point_mean(img, x, y, r=0):
     patch = img[y0:y1, x0:x1]
     return float(np.mean(patch))
 
+
+def get_cyl_axis_x(I_last):
+    """Return the x-location of the cylindrical symmetry axis in pixels."""
+    H_local, W_local = I_last.shape
+
+    if CYL_AXIS_MODE == "frame_center":
+        return 0.5 * (W_local - 1)
+
+    if CYL_AXIS_MODE == "manual":
+        if CYL_MANUAL_AXIS_X_PX is None:
+            raise ValueError("CYL_MANUAL_AXIS_X_PX must be set when CYL_AXIS_MODE='manual'.")
+        return float(CYL_MANUAL_AXIS_X_PX)
+
+    if CYL_AXIS_MODE == "centroid":
+        weights = np.asarray(I_last, dtype=float)
+        total = np.nansum(weights)
+        if not np.isfinite(total) or total <= 1e-12:
+            raise RuntimeError("Cannot compute centroid axis: last-frame intensity sum is too small.")
+
+        x_coords = np.arange(W_local, dtype=float)
+        x_weighted = np.nansum(weights * x_coords[None, :])
+        return float(x_weighted / total)
+
+    raise ValueError("CYL_AXIS_MODE must be 'centroid', 'frame_center', or 'manual'.")
+
+
+def cylindrical_full_cross_section_weights(I_shape, axis_x_px):
+    """
+    Volume weight for each pixel under cylindrical symmetry.
+
+    The image is assumed to show the full left+right cross-section of the flow.
+    Therefore each radial shell appears twice in the image, so the shell factor
+    is pi*r instead of 2*pi*r.
+
+    dV_pixel = pixel_area * pi * r
+    where r is the horizontal distance from the symmetry axis.
+    """
+    H_local, W_local = I_shape
+    x_coords = np.arange(W_local, dtype=float)
+    r_px = np.abs(x_coords - axis_x_px)
+    r_m = np.maximum(r_px * M_PER_PX, CYL_R_EPS_PX * M_PER_PX)
+    return (np.pi * r_m[None, :] * PX_AREA_M2).astype(np.float64)
+
+
+def calibrate_k_cylindrical(I_last):
+    """Calibrate intensity-to-concentration using cylindrical symmetry."""
+    V_m3 = INJECTED_VOL_ML * 1e-6
+    M_total_kg = FLUID_DENSITY * V_m3
+
+    axis_x_px = get_cyl_axis_x(I_last)
+    dV_weights = cylindrical_full_cross_section_weights(I_last.shape, axis_x_px)
+
+    weighted_sum = float(np.nansum(I_last * dV_weights))
+    if weighted_sum < 1e-12:
+        raise RuntimeError("Weighted last-frame intensity is ~0 after preprocessing. Calibration will fail.")
+
+    k = M_total_kg / weighted_sum
+    return k, axis_x_px, M_total_kg, V_m3
+
 # =========================
 # MAIN
 # =========================
@@ -209,20 +279,14 @@ else:
     x2, y2 = P2
 
 # ===== Step 3: calibration =====
-V_m3 = INJECTED_VOL_ML * 1e-6
-M_total_kg = FLUID_DENSITY * V_m3
-
 I_last = frames_I[-1]
-sum_I_last = float(np.sum(I_last))
 
-# Avoid divide by zero
-if sum_I_last < 1e-12:
-    raise RuntimeError("Sum of last-frame intensity is ~0 after preprocessing. Calibration will fail.")
+k, cyl_axis_x_px, M_total_kg, V_m3 = calibrate_k_cylindrical(I_last)
 
-k = M_total_kg / (sum_I_last * PX_AREA_M2 * DEPTH_M)  # so that C = k*I gives correct total mass
-
-print("Calibration done.")
-print(f"M_total_kg = {M_total_kg:.3e} kg,  DEPTH_M={DEPTH_M}, k={k:.3e} (kg/m^3 per intensity-unit)")
+print("Calibration done using cylindrical symmetry.")
+print(f"M_total_kg = {M_total_kg:.3e} kg")
+print(f"CYL_AXIS_MODE = {CYL_AXIS_MODE}, axis_x = {cyl_axis_x_px:.2f} px")
+print(f"k = {k:.3e} (kg/m^3 per intensity-unit)")
 
 # ===== Step 4: two-point time series + primes =====
 
@@ -380,7 +444,7 @@ def update(i):
 
     # update text box
     txt.set_text(
-        f"V_tot = {V_m3:.2e} [m³] | ρ = {FLUID_DENSITY:.1f} [kg/m³] | M_tot = {M_total_kg:.2e} [kg] | DEPTH = {DEPTH_M:.2g} [m]\n"
+        f"V_tot = {V_m3:.2e} [m³] | ρ = {FLUID_DENSITY:.1f} [kg/m³] | M_tot = {M_total_kg:.2e} [kg] | axis x = {cyl_axis_x_px:.1f} px\n"
         f"<c1> = {c1_bar:.2e} | c1' = {c1_p[i]:+.2e} | <c2> = {c2_bar:.2e} | c2' = {c2_p[i]:+.2e}"
     )
     return im, line_c1, line_c2, time_line, txt
